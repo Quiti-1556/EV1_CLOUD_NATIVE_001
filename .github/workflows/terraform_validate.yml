@@ -1,0 +1,28 @@
+name: Terraform y scripts
+on:
+  pull_request:
+    paths: ['terraform/**', 'scripts/**', '.github/**']
+  push:
+    branches: [main]
+    paths: ['terraform/**', 'scripts/**', '.github/**']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.11.4'
+      - run: terraform -chdir=terraform fmt -check -recursive
+      - run: terraform -chdir=terraform init -backend=false -input=false
+      - run: terraform -chdir=terraform validate
+      - run: terraform -chdir=terraform/bootstrap init -input=false
+      - run: terraform -chdir=terraform/bootstrap validate
+      - name: Bash syntax and ShellCheck
+        run: |
+          for script in scripts/*.sh sincronizar-github.sh; do bash -n "$script"; done
+          shellcheck -S error scripts/*.sh sincronizar-github.sh

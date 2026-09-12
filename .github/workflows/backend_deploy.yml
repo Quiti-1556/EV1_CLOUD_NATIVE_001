@@ -1,0 +1,48 @@
+name: Backend Deploy
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Ambiente
+        type: choice
+        options: [DEV, QA, PROD]
+        default: DEV
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: solicitud-${{ inputs.environment }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    environment: ${{ inputs.environment }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.11.4'
+          terraform_wrapper: false
+      - uses: ./.github/actions/aws-auth
+        with:
+          region: ${{ vars.AWS_REGION }}
+          role: ${{ vars.AWS_ROLE_ARN }}
+          access-key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Seleccionar ambiente
+        env:
+          SELECTED: ${{ inputs.environment }}
+        run: echo "TARGET_ENV=${SELECTED,,}" >> "$GITHUB_ENV"
+      - name: Leer estado remoto
+        run: bash scripts/terraform-init.sh "$TARGET_ENV"
+      - name: Publicar
+        run: bash scripts/publicar-ecs.sh "$TARGET_ENV"

@@ -1,0 +1,7 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {challenge,validateTransaction,validateConfig} from '../src/js/auth.js';
+const cfg={authEnabled:true,apiUrl:'https://api.example.com',redirectUri:'https://app.example.com/',cognitoDomain:'https://login.example.com',clientId:'client123',resourcePath:'/solicitudes'};
+test('PKCE corresponde al vector RFC 7636',async()=>assert.equal(await challenge('dBjftJeZ4CVP-mB92K27uhbUJU1p1r_wW1gFWFOEjXk'),'E9Melhoa2OwvFrEMTJguCHaoeK1t8URWbuGJSstw-cM'));
+test('OAuth rechaza state ausente, distinto y transacción expirada',()=>{const t={state:'abc',verifier:'a'.repeat(64),createdAt:1000};assert.doesNotThrow(()=>validateTransaction(t,'abc',2000));assert.throws(()=>validateTransaction(t,null,2000));assert.throws(()=>validateTransaction(t,'other',2000));assert.throws(()=>validateTransaction(t,'abc',602000));assert.throws(()=>validateTransaction(null,'abc',2000));});
+test('Configuración rechaza demo pública, HTTP público y origen de retorno incorrecto',()=>{assert.doesNotThrow(()=>validateConfig(cfg,'https://app.example.com/'));assert.throws(()=>validateConfig({...cfg,authEnabled:false},'https://app.example.com/'));assert.throws(()=>validateConfig({...cfg,apiUrl:'http://api.example.com'},'https://app.example.com/'));assert.throws(()=>validateConfig(cfg,'https://other.example.com/'));assert.throws(()=>validateConfig({...cfg,apiUrl:'https://u:p@api.example.com'},'https://app.example.com/'));});

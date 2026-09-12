@@ -1,0 +1,32 @@
+name: Security scan
+on:
+  workflow_call:
+  pull_request:
+  schedule:
+    - cron: '21 8 * * 1'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Escanear repositorio y secretos
+        uses: aquasecurity/trivy-action@v0.69.3
+        with:
+          scan-type: fs
+          scan-ref: .
+          scanners: vuln,secret
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+      - name: Construir imagen con pruebas
+        run: docker build --platform linux/amd64 -t solicitud-audit backend
+      - name: Escanear imagen final
+        uses: aquasecurity/trivy-action@v0.69.3
+        with:
+          image-ref: solicitud-audit
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          exit-code: '1'

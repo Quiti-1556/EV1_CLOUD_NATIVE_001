@@ -1,0 +1,150 @@
+name: Deploy completo
+on:
+  push:
+    branches: [main]
+    paths: ['backend/**', 'frontend/**', 'user-token-ms/**', 'terraform/**', 'scripts/**', '.github/**']
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Ambiente
+        type: choice
+        options: [DEV, QA, PROD]
+        default: DEV
+        required: true
+permissions:
+  contents: read
+  id-token: write
+concurrency:
+  group: solicitud-${{ inputs.environment || 'DEV' }}
+  cancel-in-progress: false
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    environment: ${{ inputs.environment || 'DEV' }}
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      TF_STATE_BUCKET: ${{ vars.TF_STATE_BUCKET }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.11.4'
+          terraform_wrapper: false
+      - uses: ./.github/actions/aws-auth
+        with:
+          region: ${{ vars.AWS_REGION }}
+          role: ${{ vars.AWS_ROLE_ARN }}
+          access-key: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          secret-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Seleccionar ambiente
+        env:
+          SELECTED: ${{ inputs.environment || 'DEV' }}
+        run: echo "TARGET_ENV=${SELECTED,,}" >> "$GITHUB_ENV"
+      - name: Validar frontend antes de crear recursos
+        working-directory: frontend
+        run: npm ci --ignore-scripts && npm test && npm run build
+      - name: Validar Lambda de emisión de tokens
+        working-directory: user-token-ms
+        run: node --test
+      - name: Java 21
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+      - name: Validar backend antes de crear recursos
+        working-directory: backend
+        run: mvn --batch-mode --no-transfer-progress verify
+      - name: Terraform, backend, frontend y smoke
+        run: bash scripts/deploy.sh "$TARGET_ENV"
+      - name: Verificar scopes emitidos por user-token-ms
+        run: |
+          set -euo pipefail
+          export AWS_PAGER=""
+          export TF_DATA_DIR="$GITHUB_WORKSPACE/terraform/.terraform-${TARGET_ENV}"
+
+          DEPLOYMENT="$(terraform -chdir=terraform output -json deployment)"
+          FUNCTION_NAME="$(jq -r '.TOKEN_LAMBDA_NAME' <<<"$DEPLOYMENT")"
+          USER_POOL_ID="$(jq -r '.COGNITO_USER_POOL_ID' <<<"$DEPLOYMENT")"
+          CLIENT_ID="$(jq -r '.COGNITO_CLIENT_ID' <<<"$DEPLOYMENT")"
+
+          read -r TRIGGER_VERSION TRIGGER_ARN < <(
+            aws cognito-idp describe-user-pool \
+              --user-pool-id "$USER_POOL_ID" \
+              --query 'UserPool.LambdaConfig.PreTokenGenerationConfig.[LambdaVersion,LambdaArn]' \
+              --output text
+          )
+
+          [[ "$TRIGGER_VERSION" == "V2_0" ]] || {
+            echo "::error::El trigger Pre Token Generation no está en V2_0: ${TRIGGER_VERSION}" >&2
+            exit 1
+          }
+          [[ "$TRIGGER_ARN" == *":function:${FUNCTION_NAME}"* ]] || {
+            echo "::error::Cognito no está enlazado a ${FUNCTION_NAME}: ${TRIGGER_ARN}" >&2
+            exit 1
+          }
+
+          CLIENT_SCOPES="$(aws cognito-idp describe-user-pool-client \
+            --user-pool-id "$USER_POOL_ID" \
+            --client-id "$CLIENT_ID" \
+            --query 'UserPoolClient.AllowedOAuthScopes' \
+            --output json)"
+
+          for required_scope in solicitudes/read solicitudes/write solicitudes/approve; do
+            jq -e --arg scope "$required_scope" 'index($scope) != null' \
+              <<<"$CLIENT_SCOPES" >/dev/null || {
+              echo "::error::El App Client no tiene asociado ${required_scope}" >&2
+              exit 1
+            }
+          done
+
+          verify_group() {
+            local group="$1"
+            local expected="$2"
+            local suffix="${group,,}"
+
+            jq -n --arg group "$group" '{
+              version: "2",
+              triggerSource: "TokenGeneration_HostedAuth",
+              userName: "smoke-test",
+              request: {
+                userAttributes: {email: "smoke@example.invalid"},
+                groupConfiguration: {groupsToOverride: [$group]}
+              },
+              response: {}
+            }' > ".runtime/token-${suffix}-event.json"
+
+            aws lambda invoke \
+              --function-name "$FUNCTION_NAME" \
+              --cli-binary-format raw-in-base64-out \
+              --payload "fileb://.runtime/token-${suffix}-event.json" \
+              ".runtime/token-${suffix}-output.json" >/dev/null
+
+            local actual
+            actual="$(jq -c '.response.claimsAndScopeOverrideDetails.accessTokenGeneration.scopesToAdd' ".runtime/token-${suffix}-output.json")"
+            [[ "$actual" == "$expected" ]] || {
+              echo "::error::Scopes incorrectos para ${group}: ${actual}" >&2
+              exit 1
+            }
+          }
+
+          verify_group SOLICITANTE '["solicitudes/read","solicitudes/write"]'
+          verify_group APROBADOR '["solicitudes/read","solicitudes/approve"]'
+
+          {
+            echo '### Scopes dinámicos verificados'
+            echo ''
+            echo '- `SOLICITANTE`: `solicitudes/read solicitudes/write`'
+            echo '- `APROBADOR`: `solicitudes/read solicitudes/approve`'
+            echo '- Trigger Cognito: `V2_0`'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Resumen
+        run: |
+          echo 'Despliegue y smoke completados.' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Consulta frontend_url con Terraform para abrir la aplicación.' >> "$GITHUB_STEP_SUMMARY"

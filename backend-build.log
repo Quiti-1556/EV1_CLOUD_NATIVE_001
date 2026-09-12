@@ -1,0 +1,217 @@
+DEPRECATED: The legacy builder is deprecated and will be removed in a future release.
+            Install the buildx component to build images with BuildKit:
+            https://docs.docker.com/go/buildx/
+
+Sending build context to Docker daemon   76.8kB
+Step 1/16 : FROM maven:3.9.11-eclipse-temurin-21 AS build
+ ---> 6fdc855a6ed8
+Step 2/16 : WORKDIR /workspace
+ ---> Running in 3c1eed001468
+ ---> Removed intermediate container 3c1eed001468
+ ---> ff23c558c5af
+Step 3/16 : COPY pom.xml .
+ ---> c8530f5ea10f
+Step 4/16 : COPY src ./src
+ ---> 452aaacb5fc7
+Step 5/16 : RUN mvn --batch-mode --no-transfer-progress verify
+ ---> Running in a46b52c6a1e9
+[INFO] Scanning for projects...
+[INFO] 
+[INFO] ---------------------< cl.solicitudes:solicitudes >---------------------
+[INFO] Building solicitudes 1.0.0
+[INFO]   from pom.xml
+[INFO] --------------------------------[ jar ]---------------------------------
+[INFO] 
+[INFO] --- resources:3.5.0:resources (default-resources) @ solicitudes ---
+[INFO] Copying 3 resources from src/main/resources to target/classes
+[INFO] Copying 1 resource from src/main/resources to target/classes
+[INFO] 
+[INFO] --- compiler:3.15.0:compile (default-compile) @ solicitudes ---
+[INFO] Recompiling the module because of changed source code.
+[INFO] Compiling 20 source files with javac [debug parameters release 21] to target/classes
+[INFO] 
+[INFO] --- resources:3.5.0:testResources (default-testResources) @ solicitudes ---
+[INFO] Copying 1 resource from src/test/resources to target/test-classes
+[INFO] 
+[INFO] --- compiler:3.15.0:testCompile (default-testCompile) @ solicitudes ---
+[INFO] Recompiling the module because of changed dependency.
+[INFO] Compiling 2 source files with javac [debug parameters release 21] to target/test-classes
+[INFO] 
+[INFO] --- surefire:3.5.6:test (default-test) @ solicitudes ---
+[INFO] Using auto detected provider org.apache.maven.surefire.junitplatform.JUnitPlatformProvider
+[INFO] 
+[INFO] -------------------------------------------------------
+[INFO]  T E S T S
+[INFO] -------------------------------------------------------
+[INFO] Running cl.solicitudes.security.CognitoAccessTokenValidatorTest
+[INFO] Tests run: 1, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.058 s -- in cl.solicitudes.security.CognitoAccessTokenValidatorTest
+[INFO] Running cl.solicitudes.solicitud.SolicitudServiceTest
+[91mMockito is currently self-attaching to enable the inline-mock-maker. This will no longer work in future releases of the JDK. Please add Mockito as an agent to your build as described in Mockito's documentation: https://javadoc.io/doc/org.mockito/mockito-core/latest/org.mockito/org/mockito/Mockito.html#0.3
+[0m[91mWARNING: A Java agent has been loaded dynamically (/root/.m2/repository/net/bytebuddy/byte-buddy-agent/1.18.11/byte-buddy-agent-1.18.11.jar)
+WARNING: If a serviceability tool is in use, please run with -XX:+EnableDynamicAgentLoading to hide this warning
+WARNING: If a serviceability tool is not in use, please run with -Djdk.instrument.traceUsage for more information
+WARNING: Dynamic loading of agents will be disallowed by default in a future release
+[0m[INFO] Tests run: 6, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 0.710 s -- in cl.solicitudes.solicitud.SolicitudServiceTest
+[INFO] 
+[INFO] Results:
+[INFO] 
+[INFO] Tests run: 7, Failures: 0, Errors: 0, Skipped: 0
+[INFO] 
+[INFO] 
+[INFO] --- jar:3.5.1:jar (default-jar) @ solicitudes ---
+[INFO] Building jar: /workspace/target/solicitudes.jar
+[INFO] 
+[INFO] --- spring-boot:4.1.1:repackage (repackage) @ solicitudes ---
+[INFO] Replacing main artifact /workspace/target/solicitudes.jar with repackaged archive, adding nested dependencies in BOOT-INF/.
+[INFO] The original artifact has been renamed to /workspace/target/solicitudes.jar.original
+[INFO] ------------------------------------------------------------------------
+[INFO] BUILD SUCCESS
+[INFO] ------------------------------------------------------------------------
+[INFO] Total time:  03:10 min
+[INFO] Finished at: 2026-09-11T15:54:12Z
+[INFO] ------------------------------------------------------------------------
+ ---> Removed intermediate container a46b52c6a1e9
+ ---> 38c9e5d4cf62
+Step 6/16 : RUN curl --fail --silent --show-error --proto '=https' --tlsv1.2     https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem -o /workspace/rds-ca.pem     && test -s /workspace/rds-ca.pem
+ ---> Running in ad5727b49b70
+ ---> Removed intermediate container ad5727b49b70
+ ---> 20aad03e92e8
+Step 7/16 : RUN mkdir -p /workspace/tmp && chmod 1777 /workspace/tmp
+ ---> Running in 696918da09dd
+ ---> Removed intermediate container 696918da09dd
+ ---> 98ac8c66d065
+Step 8/16 : FROM gcr.io/distroless/java21-debian13:nonroot
+nonroot: Pulling from distroless/java21-debian13
+1a4be5562d92: Pulling fs layer
+99515e7b4d35: Pulling fs layer
+93d46c07550c: Pulling fs layer
+129b9479d271: Pulling fs layer
+d6b1b89eccac: Pulling fs layer
+b80e528246b2: Pulling fs layer
+b839dfae01f6: Pulling fs layer
+ebddc55facdc: Pulling fs layer
+eb67871efa33: Pulling fs layer
+8b0390b1dccb: Pulling fs layer
+1eed391ea893: Pulling fs layer
+2780920e5dbf: Pulling fs layer
+c172f21841df: Pulling fs layer
+c4bc6f35ff5e: Pulling fs layer
+2d4d7adf6272: Pulling fs layer
+8224d91da70b: Pulling fs layer
+69cfc61ee473: Pulling fs layer
+7c12895b777b: Pulling fs layer
+cef3c9b30f2b: Pulling fs layer
+693ba7c06b04: Pulling fs layer
+7cc70dfd88cf: Pulling fs layer
+99ba982a9142: Pulling fs layer
+cac2ae0193cb: Pulling fs layer
+0f9eea95e3ff: Pulling fs layer
+3214acf345c0: Pulling fs layer
+4d0c8f097af7: Pulling fs layer
+f114bb350e79: Pulling fs layer
+74eb32e2067b: Pulling fs layer
+adca825b2a05: Pulling fs layer
+6c955cb5824a: Pulling fs layer
+dd64bf2dd177: Pulling fs layer
+5a380f5229b7: Pulling fs layer
+52630fc75a18: Pulling fs layer
+d406a2663c28: Pulling fs layer
+52630fc75a18: Already exists
+2780920e5dbf: Already exists
+7c12895b777b: Already exists
+b839dfae01f6: Already exists
+dd64bf2dd177: Already exists
+3214acf345c0: Already exists
+ebddc55facdc: Download complete
+b80e528246b2: Download complete
+c172f21841df: Download complete
+1eed391ea893: Download complete
+c172f21841df: Pull complete
+1eed391ea893: Pull complete
+1a4be5562d92: Download complete
+129b9479d271: Download complete
+4d0c8f097af7: Download complete
+c4bc6f35ff5e: Download complete
+f114bb350e79: Download complete
+99515e7b4d35: Download complete
+cac2ae0193cb: Download complete
+693ba7c06b04: Download complete
+69cfc61ee473: Download complete
+74eb32e2067b: Download complete
+8224d91da70b: Download complete
+99515e7b4d35: Pull complete
+d6b1b89eccac: Download complete
+cef3c9b30f2b: Download complete
+99ba982a9142: Download complete
+eb67871efa33: Download complete
+d6b1b89eccac: Pull complete
+99ba982a9142: Pull complete
+52630fc75a18: Pull complete
+2780920e5dbf: Pull complete
+7c12895b777b: Pull complete
+dd64bf2dd177: Pull complete
+3214acf345c0: Pull complete
+0f9eea95e3ff: Download complete
+93d46c07550c: Download complete
+b839dfae01f6: Pull complete
+ebddc55facdc: Pull complete
+c4bc6f35ff5e: Pull complete
+d406a2663c28: Download complete
+6c955cb5824a: Download complete
+8b0390b1dccb: Download complete
+7cc70dfd88cf: Download complete
+5a380f5229b7: Download complete
+2d4d7adf6272: Download complete
+f114bb350e79: Pull complete
+cac2ae0193cb: Pull complete
+93d46c07550c: Pull complete
+2d4d7adf6272: Pull complete
+d406a2663c28: Pull complete
+6c955cb5824a: Pull complete
+5a380f5229b7: Pull complete
+129b9479d271: Pull complete
+693ba7c06b04: Pull complete
+74eb32e2067b: Pull complete
+0f9eea95e3ff: Pull complete
+8b0390b1dccb: Pull complete
+1a4be5562d92: Pull complete
+8224d91da70b: Pull complete
+cef3c9b30f2b: Pull complete
+7cc70dfd88cf: Pull complete
+69cfc61ee473: Pull complete
+eb67871efa33: Pull complete
+4d0c8f097af7: Pull complete
+adca825b2a05: Download complete
+b80e528246b2: Pull complete
+adca825b2a05: Pull complete
+Digest: sha256:bb0b3c7edc4417acdf76ea0f52bb5fae28881fe05aae6cc55af4cc4cb0200d2d
+Status: Downloaded newer image for gcr.io/distroless/java21-debian13:nonroot
+ ---> bb0b3c7edc44
+Step 9/16 : WORKDIR /app
+ ---> Running in 12755c4e8725
+ ---> Removed intermediate container 12755c4e8725
+ ---> 872b4cbeee7f
+Step 10/16 : COPY --from=build --chown=nonroot:nonroot /workspace/target/solicitudes.jar /app/app.jar
+ ---> 3fe332f635c8
+Step 11/16 : COPY --from=build /workspace/rds-ca.pem /app/rds-ca.pem
+ ---> 4f47deb1c5e9
+Step 12/16 : COPY --from=build --chown=65532:65532 /workspace/tmp /tmp
+ ---> 4fe921e9f48d
+Step 13/16 : VOLUME ["/tmp"]
+ ---> Running in a365d34d4165
+ ---> Removed intermediate container a365d34d4165
+ ---> 8cc759fadf28
+Step 14/16 : USER 65532:65532
+ ---> Running in b0b67c8d6979
+ ---> Removed intermediate container b0b67c8d6979
+ ---> 692c2d091aa1
+Step 15/16 : EXPOSE 8080
+ ---> Running in e6fd501b43e0
+ ---> Removed intermediate container e6fd501b43e0
+ ---> 3eadd59d138e
+Step 16/16 : ENTRYPOINT ["java","-XX:MaxRAMPercentage=75.0","-Djava.io.tmpdir=/tmp","-jar","/app/app.jar"]
+ ---> Running in bfa508011eaa
+ ---> Removed intermediate container bfa508011eaa
+ ---> 21da705e776c
+Successfully built 21da705e776c
+Successfully tagged solicitud-debug:latest
