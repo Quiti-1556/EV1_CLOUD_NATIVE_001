@@ -1,3 +1,77 @@
+# DSY1107 EP1 — Angular + Cognito + API Gateway, sin CloudFront propio
+
+Proyecto completo basado en el entregable original DSY1107-EP1-Acevedo.
+Se conservan solicitudes, entidades JPA, PostgreSQL, migraciones Flyway y ambientes DEV/QA/PROD.
+Backend Java 21 / Spring Boot 4.1.1; frontend Angular real con Angular CLI.
+
+## Qué incluye
+
+- Angular alojado en Amplify, compilado y publicado desde GitHub Actions.
+- Cognito autentica; Lambda Pre Token Generation V2 agrega/suprime scopes por grupo.
+- SOLICITANTE: solicitudes/read y solicitudes/write.
+- APROBADOR: solicitudes/read y solicitudes/approve.
+- Grupos desconocidos: ningún permiso de solicitudes; se suprimen todos esos scopes.
+- API Gateway valida JWT y exige scopes por ruta.
+- Gateway sobrescribe headers de identidad con claims del autorizador.
+- Backend privado: no JwtDecoder, Nimbus, Resource Server ni validación criptográfica de tokens.
+- VPC Link → ALB interno → ECS Fargate → RDS PostgreSQL.
+- Una segunda Lambda, session-ms, canjea Authorization Code + PKCE S256 y renueva la sesión.
+- Access Token solo en memoria Angular; Refresh Token cifrado en cookie HttpOnly + Secure + SameSite=None.
+- CORS con origen explícito y credenciales, CSRF para renovación/logout, rotación de refresh.
+- No distribución, Function, consultas de políticas ni permisos CloudFront propios.
+- Amplify puede usar su CDN administrada internamente: no se crea ni gestiona una distribución CloudFront desde este Terraform.
+
+## Limitación importante de las URLs gratuitas
+
+Amplify (amplifyapp.com) y API Gateway (execute-api.amazonaws.com) son sitios distintos.
+Para enviar el Refresh Token en llamadas Angular se usa SameSite=None; Secure y withCredentials.
+El navegador debe permitir esa cookie de terceros para este sitio.
+Si la bloquea, el login de Cognito puede finalizar pero la renovación dará 401.
+No se degrada a localStorage ni a una cookie accesible por JavaScript.
+Para una solución de producción sin depender de cookies de terceros, hacen falta dominios HTTPS bajo un mismo sitio, por ejemplo app.tudominio.cl y api.tudominio.cl. Esa alternativa requiere configuración adicional de dominio/certificados y no está desplegada en este ZIP.
+
+
+## Uso de "tenant"
+
+l proyecto de solicitudes usa Amazon Cognito User Pool como dominio/directorio de identidad. Dentro de él usa Cognito Groups (SOLICITANTE, APROBADOR) y OAuth scopes (solicitudes/read, write, approve). No tiene tenant_id ni multi-tenancy implementada actualmente.
+
+
+## Deploy
+
+Leer [docs/OPERACION.md](docs/OPERACION.md) antes de subirlo al repositorio existente.
+Configurar el Environment DEV en GitHub: AWS_REGION, TF_STATE_BUCKET y credenciales actuales.
+Usar el mismo estado Terraform; revisar ARN LabRole de terraform/environments/*.tfvars.
+Ejecutar Actions → Deploy completo → Run workflow → DEV.
+Abrir frontend_url, que ahora es la URL de Amplify.
+API_URL y FRONTEND_API_URL son el API Gateway directo, sin prefijo /api.
+El callback Cognito es API_URL/auth/callback, no la URL estática del frontend.
+
+## Tokens y YAML
+
+| Token | Ubicación | Vigencia |
+|---|---|---|
+| Access | Memoria Angular | 15 minutos |
+| Refresh | Cookie cifrada HttpOnly, Secure, SameSite=None, host-only, Path=/auth | Hasta 24 horas originales |
+| Transacción PKCE | Cookie cifrada HttpOnly, Secure, SameSite=Lax | 10 minutos |
+| ID | No se entrega ni persiste en Angular | No autoriza las rutas |
+
+Los workflows YAML compilan/despliegan el código y su configuración; nunca contienen tokens reales de usuarios.
+config.json contiene únicamente datos públicos.
+Memoria no significa inmunidad a XSS; HttpOnly impide leer la cookie con JS, no usar la sesión desde un XSS.
+
+## Rutas
+
+| Operación | Scope |
+|---|---|
+| GET /datos, /solicitudes, /solicitudes/mias, /solicitudes/{id} | solicitudes/read |
+| POST /solicitudes, PUT y DELETE /solicitudes/{id} | solicitudes/write |
+| GET /solicitudes/pendientes, POST /solicitudes/{id}/decision | solicitudes/approve |
+
+Se conservan alias /productos con scopes solicitudes/* para compatibilidad con el original.
+El ejemplo lectores/editores y productos/* de otro código no reemplaza los grupos de este entregable.
+El backend conserva reglas de negocio: propiedad del registro, estado y bloqueo de autoaprobación.
+No exponer directamente ALB/ECS: los headers de identidad solo son confiables dentro del perímetro privado.
+
 # Solicitud — aplicación y despliegue AWS
 
 Proyecto basado en el flujo de **EV1**, adaptado a **solicitudes-seguro**. Conserva Java/Spring Boot, PostgreSQL, contenedores, API Gateway, Cognito, Amplify, scripts Bash y GitHub Actions. El frontend original era JavaScript estático (no Angular); se mantiene su stack y se renueva por completo su interfaz.
@@ -176,20 +250,82 @@ bash scripts/deploy.sh prod
 
 O ejecuta **Deploy completo → Run workflow → QA / PROD** desde main. Cada ambiente tiene su propia BD, usuarios Cognito y datos; no se copian datos de DEV a PROD. PROD mantiene protección contra borrado de RDS, Cognito y ALB.
 
-## Estructura
 
-```text
-backend/                  Spring Boot 4.1.1, Java 21, pruebas y Flyway
-frontend/                 HTML/CSS/JS, login PKCE, pruebas y build estático
-terraform/                Infraestructura principal
-terraform/bootstrap/      Bucket de estado y OIDC opcional
-terraform/environments/   dev.tfvars, qa.tfvars, prod.tfvars
-scripts/                  Mismo recorrido para terminal y Actions
-.github/workflows/        CI, seguridad y despliegues
-.github/actions/aws-auth/ OIDC o credenciales temporales
-docs/                     Seguridad, operación y validaciones
+## 8. Creación de Usuarios y MFA
+
+Se Crean usuarios de prueba y sus respectivas contraseñas: 
+
+
+USER_NAME: solicitante@gmail.com 
+ 
+ADMIN_USERNAME: aprobador@gmail.com 
+ 
+USER_PASS: Solicitante2026#Dev! 
+ 
+ADMIN_PASS: Aprobador2026#Dev! 
+
+
+```bash
+aws cognito-idp admin-create-user \
+  --user-pool-id "$POOL_ID" \
+  --username solicitante@gmail.com \
+  --user-attributes Name=email,Value=solicitante@gmail.com Name=email_verified,Value=true \
+  --region us-east-1
+
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id "$POOL_ID" \
+  --username solicitante@gmail.com \
+  --password 'user' \
+  --permanent \
+  --group-name SOLICITANTE \
+  --region us-east-1
+
+
+aws cognito-idp admin-create-user \
+  --user-pool-id "$POOL_ID" \
+  --username aprobador@gmail.com \
+  --user-attributes Name=email,Value=aprobador@gmail.com Name=email_verified,Value=true \
+  --region us-east-1
+
+aws cognito-idp admin-add-user-to-group \
+  --user-pool-id "$POOL_ID" \
+  --username aprobador@gmail.com \
+  --group-name APROBADOR \
+  --region us-east-1
+
+aws cognito-idp admin-set-user-password \
+  --user-pool-id "$POOL_ID" \
+  --username solicitante@gmail.com \
+  --password 'Solicitante2026#Dev!' \
+  --permanent \
+  --region us-east-1
+
+aws cognito-idp admin-set-user-password \
+  --user-pool-id "$POOL_ID" \
+  --username aprobador@gmail.com \
+  --password 'Aprobador2026#Dev!' \
+  --permanent \
+  --region us-east-1
+
 ```
 
-No se copia el microservicio `user-token-ms` de EV1: esta aplicación obtiene access tokens directamente de Cognito mediante PKCE y la API comprueba su firma. No se agrega un proxy de contraseñas.
+## MFA
 
-Referencias utilizadas: [integraciones privadas de API Gateway](https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-develop-integrations-private.html), [claims de access tokens Cognito](https://docs.aws.amazon.com/cognito/latest/developerguide/amazon-cognito-user-pools-using-the-access-token.html), [estado S3 y bloqueo nativo de Terraform](https://developer.hashicorp.com/terraform/language/backend/s3).
+Se necesita app para autenticar con código de 6 dígitos, ya sea de Google, Microsoft, Privada, etc.. 
+Se requiere crear, actualizar y probar uso de nuevo token MFA generado con los scripts en la documentación hay mas información. 
+Para más información, tiene la siguiente documentación: [docs/OPERACION.md](docs/OPERACION.md) 
+
+
+
+
+
+
+## Evidencias y pruebas
+
+- [docs/EVIDENCIAS.md](docs/EVIDENCIAS.md): capturas PKCE, cookies, usuarios, Postman 200/401/403 y Angular → Gateway → backend.
+- [docs/SEGURIDAD.md](docs/SEGURIDAD.md): fronteras de confianza y limitaciones.
+- [docs/VALIDACION.md](docs/VALIDACION.md): resultados locales y pruebas AWS pendientes.
+- postman/EP1.postman_collection.json: colección lista para importar y completar con tus valores.
+
+No ejecutar terraform destroy ni borrar tfstate/RDS para resolver errores.
+No se promete un despliegue AWS verificado: requiere tus permisos, credenciales vigentes, recursos y prueba real de navegador.

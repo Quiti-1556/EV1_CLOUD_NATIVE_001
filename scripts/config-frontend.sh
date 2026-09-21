@@ -2,21 +2,17 @@
 source "$(dirname "$0")/common.sh"
 need node
 if [[ $# -gt 0 ]]; then load_outputs "$1"; fi
-export CLIENT_ID="${COGNITO_CLIENT_ID:-${CLIENT_ID:-}}"
-: "${API_URL:?Falta API_URL}"
-: "${REDIRECT_URI:?Falta REDIRECT_URI}"
-: "${COGNITO_DOMAIN:?Falta COGNITO_DOMAIN}"
-: "${CLIENT_ID:?Falta COGNITO_CLIENT_ID}"
-export API_URL REDIRECT_URI COGNITO_DOMAIN
+: "${FRONTEND_API_URL:?Falta FRONTEND_API_URL; primero Deploy completo}"
+: "${REDIRECT_URI:?}" "${COGNITO_DOMAIN:?}" "${COGNITO_CLIENT_ID:?}"
+export FRONTEND_API_URL REDIRECT_URI COGNITO_DOMAIN COGNITO_CLIENT_ID SESSION_API_URL
 node --input-type=module <<'NODE'
 import {writeFileSync} from 'node:fs';
-const v=process.env;
-for(const key of ['API_URL','REDIRECT_URI','COGNITO_DOMAIN']){
- const u=new URL(v[key]);if(u.protocol!=='https:' || u.username || u.password || u.hash || u.search)throw new Error(key+' debe ser URL HTTPS sin credenciales, query ni fragmento');
-}
-if(!/^[a-zA-Z0-9]+$/.test(v.CLIENT_ID))throw new Error('Client ID inválido');
-const c={region:v.AWS_REGION||'',cognitoDomain:v.COGNITO_DOMAIN.replace(/\/$/,''),clientId:v.CLIENT_ID,
- redirectUri:v.REDIRECT_URI,apiUrl:v.API_URL.replace(/\/$/,''),authEnabled:true,resourcePath:'/solicitudes'};
+const v=process.env,api=new URL(v.FRONTEND_API_URL),front=new URL(v.REDIRECT_URI),cognito=new URL(v.COGNITO_DOMAIN);
+for(const u of [api,front,cognito])if(u.protocol!=='https:'||u.username||u.password||u.search||u.hash)throw Error('Configuración requiere HTTPS sin credenciales ni query');
+const session=new URL(v.SESSION_API_URL||v.FRONTEND_API_URL);
+if(session.origin!==api.origin||session.pathname!==api.pathname||session.search||session.hash||session.username||session.password)throw Error('Sesión debe usar el mismo API Gateway');
+if(!/^[a-zA-Z0-9]+$/.test(v.COGNITO_CLIENT_ID))throw Error('Client ID inválido');
+const c={region:v.AWS_REGION||'',apiUrl:v.FRONTEND_API_URL,sessionApiUrl:session.href.replace(/\/$/,''),redirectUri:v.REDIRECT_URI,cognitoDomain:v.COGNITO_DOMAIN,clientId:v.COGNITO_CLIENT_ID,authEnabled:true,resourcePath:'/solicitudes'};
 writeFileSync('frontend/src/assets/config.json',JSON.stringify(c,null,2)+'\n');
-console.log('Configuración pública generada; autenticación obligatoria.');
+console.log('Configuración pública Angular generada; sin Access/Refresh ni secretos.');
 NODE

@@ -4,6 +4,8 @@ ENVIRONMENT="${1:?Uso: infra.sh dev|qa|prod plan|apply}"
 ACTION="${2:-plan}"
 check_environment "$ENVIRONMENT"
 case "$ACTION" in plan|apply) ;; *) echo 'Acción inválida'; exit 1;; esac
+node scripts/test-policy.mjs
+bash scripts/prepare-session.sh
 bash scripts/terraform-init.sh "$ENVIRONMENT"
 export TF_DATA_DIR="$ROOT/terraform/.terraform-$ENVIRONMENT"
 mkdir -p .runtime

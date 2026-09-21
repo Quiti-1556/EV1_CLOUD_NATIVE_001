@@ -45,3 +45,18 @@ test('un grupo desconocido no concede permisos', async () => {
     [],
   );
 });
+
+test('solicitante suprime approve aunque el cliente lo solicite', async () => {
+  const event=eventFor(['SOLICITANTE']);event.request.scopes=['openid','solicitudes/approve'];
+  const result=await handler(event),access=result.response.claimsAndScopeOverrideDetails.accessTokenGeneration;
+  assert.deepEqual(access.scopesToSuppress,['solicitudes/approve']);
+  assert.equal(access.claimsToAddOrOverride.verified_name,'test@example.invalid');
+});
+
+test('grupos especiales o ausencia de grupos no conceden scopes', async()=>{
+ for(const groups of [[],['constructor','__proto__','toString']]){
+  const access=(await handler(eventFor(groups))).response.claimsAndScopeOverrideDetails.accessTokenGeneration;
+  assert.deepEqual(access.scopesToAdd,[]);
+  assert.deepEqual(access.scopesToSuppress,['solicitudes/read','solicitudes/write','solicitudes/approve']);
+ }
+});

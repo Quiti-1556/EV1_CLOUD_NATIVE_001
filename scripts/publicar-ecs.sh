@@ -43,18 +43,65 @@ fi
 TASK="$(aws ecs register-task-definition --cli-input-json "file://$TMP_DIR/task.json" --query taskDefinition.taskDefinitionArn --output text)"
 aws ecs update-service --cluster "$ECS_CLUSTER" --service "$ECS_SERVICE" --task-definition "$TASK" --desired-count "$ECS_DESIRED_COUNT" >/dev/null
 # services-stable tiene límite corto; se inspecciona además la revisión para detectar rollback.
-for attempt in $(seq 1 6); do
-  if aws ecs wait services-stable --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE"; then
-    LIVE="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --output json)"
-    if jq -e --arg task "$TASK" --argjson count "$ECS_DESIRED_COUNT" '.services[0] | .taskDefinition==$task and .runningCount==$count and .pendingCount==0 and any(.deployments[]; .status=="PRIMARY" and .rolloutState=="COMPLETED")' <<< "$LIVE" >/dev/null; then
-      echo "Backend saludable: $ECR_REPO@$DIGEST"; exit 0
-    fi
-    echo 'ECS hizo rollback o no ejecuta la revisión solicitada.' >&2; exit 1
+echo "Revisión solicitada: $TASK"
+echo "Réplicas esperadas: $ECS_DESIRED_COUNT"
+
+for attempt in $(seq 1 120); do
+  LIVE="$(aws ecs describe-services \
+    --cluster "$ECS_CLUSTER" \
+    --services "$ECS_SERVICE" \
+    --output json)"
+
+  jq -c '{
+    errores: .failures,
+    servicio: (.services[0] | {
+      taskDefinition,
+      desiredCount,
+      runningCount,
+      pendingCount,
+      despliegues: [.deployments[]? | {
+        taskDefinition,
+        status,
+        rolloutState,
+        rolloutStateReason
+      }]
+    })
+  }' <<< "$LIVE"
+
+  if jq -e \
+    --arg task "$TASK" \
+    --argjson count "$ECS_DESIRED_COUNT" '
+      .services[0] |
+      .taskDefinition == $task
+      and .desiredCount == $count
+      and .runningCount == $count
+      and .pendingCount == 0
+      and any(.deployments[]?;
+        .taskDefinition == $task
+        and .status == "PRIMARY"
+        and .rolloutState == "COMPLETED"
+      )
+    ' <<< "$LIVE" >/dev/null; then
+    echo "Backend saludable: $ECR_REPO@$DIGEST"
+    exit 0
   fi
-  STATE="$(aws ecs describe-services --cluster "$ECS_CLUSTER" --services "$ECS_SERVICE" --query 'services[0].deployments' --output json)"
-  if jq -e --arg task "$TASK" 'any(.[]; .taskDefinition==$task and .rolloutState=="FAILED")' <<< "$STATE" >/dev/null; then
-    echo 'Circuit breaker: despliegue fallido.' >&2; exit 1
+
+  if jq -e --arg task "$TASK" '
+    any(.services[0].deployments[]?;
+      .taskDefinition == $task
+      and .rolloutState == "FAILED"
+    )
+  ' <<< "$LIVE" >/dev/null; then
+    echo "ECS confirmó fallo de la revisión solicitada." >&2
+    jq '.services[0].events[:10]' <<< "$LIVE"
+    exit 1
+  fi
+
+  if [[ "$attempt" -lt 120 ]]; then
+    sleep 15
   fi
 done
-echo 'Timeout esperando backend; consulta CloudWatch y eventos ECS.' >&2
+
+echo "Timeout: ECS no confirmó la revisión solicitada." >&2
+jq '.services[0].events[:10]' <<< "$LIVE"
 exit 1

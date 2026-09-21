@@ -1,40 +1,68 @@
-# Seguridad y límites operativos
+# Seguridad y responsabilidades
 
-## Controles incluidos
+## Identidad
 
-| Capa | Control aplicado |
-|---|---|
-| Red | VPC por ambiente, ECS/ALB/RDS privados, RDS sin ruta a Internet. SG: Link→ALB:80, ALB→ECS:8080, ECS→RDS:5432; salida HTTPS ECS para ECR/Cognito/AWS. |
-| Autenticación | Cognito Authorization Code + PKCE S256, state aleatorio y transacción de 10 minutos consumida una vez, MFA TOTP obligatorio. Invitaciones administradas, sin usuarios/contraseñas demo AWS. |
-| Tokens | Access token en memoria, nunca localStorage/sessionStorage. Solo state/verifier temporal en sessionStorage. Firma, issuer, exp/nbf, token_use=access y client_id validados en backend; JWT y scope openid también en gateway. |
-| Autorización | Grupos explícitos; cuenta sin grupo no tiene permisos API. Dueño y estado pendiente para editar/borrar; aprobador para resolver; autoaprobación prohibida; resumen personal para solicitante. |
-| Persistencia | @Version detecta escrituras simultáneas sobre el mismo registro; conflictos devuelven 409. Flyway aplica el esquema antes de promover una versión. Usuario runtime con CRUD solo en solicitudes, sin DDL. |
-| Secretos | RDS gestiona el secreto administrador. Secreto aplicación creado mediante generador AWS, sin valor en tfstate. Solo tarea efímera de migración recibe credenciales administrativas. Rol IAM de aplicación sin permisos AWS por defecto. |
-| SQL / TLS | Jdbc PostgreSQL con sslmode=verify-full y CA RDS. Consulta parametrizada y escaping PostgreSQL al aprovisionar rol. Almacenamiento RDS cifrado, respaldos 7 días DEV/QA y 14 PROD. |
-| Frontend | Cero CDN, sin eval/inline scripts, contenido escapado, CSP restrictiva generada con orígenes reales, frame-ancestors por cabecera, HSTS, nosniff, no-referrer y permisos de cámara/micrófono bloqueados. |
-| Contenedor | Usuario no root, filesystem raíz readonly, capabilities eliminadas en ECS, imagen distroless, secretos fuera de imagen, temporal /tmp montado. |
-| CI/CD | ECR inmutable, digest en tareas, escaneo Trivy antes de publicar, pruebas, rollback ECS y verificación de revisión. Estado remoto cifrado, versionado y bloqueado. OIDC por repo/Environment, alternativa de credenciales temporales para Lab. |
+Cognito valida credenciales y MFA.
+Pre Token Generation V2 recibe grupos resueltos por Cognito; no consulta el directorio ni valida un JWT ya emitido.
+Agrega scopes permitidos y suprime todos los scopes de solicitudes no autorizados.
+Registra sub, grupos y scopes para evidencia, nunca tokens ni contraseñas.
+Cognito firma el token después de aplicar la respuesta del trigger.
 
-El JWT identifica al dueño con `sub`, un identificador estable de Cognito. Si migras registros reales de una instalación anterior que guardaba `username`, debes convertir `solicitante_id` y `aprobador_id` a sus `sub` correspondientes antes del corte. El paquete crea instalaciones nuevas; no modifica una base remota existente.
+API Gateway HTTP API valida firma, issuer, audience/client_id y fechas del JWT; exige scopes por ruta.
+El ID Token no se usa como Bearer de datos.
+Las rutas de sesión no usan autorizador JWT: necesitan permitir login y refresh cuando no hay Access Token válido.
+El código de autorización o Refresh Token se valida en el endpoint HTTPS de Cognito.
 
-## Límites que debes conocer
+## Backend
 
-- **No es una certificación ni una auditoría de producción.** No se ejecutó pentest contra un despliegue real. Las pruebas de infraestructura reales dependen de tu cuenta y las verificaciones detalladas están en VALIDACION.md.
-- Las URLs públicas usan HTTPS y SQL valida el certificado RDS. **VPC Link→ALB→ECS usa HTTP dentro de las subredes privadas.** Si tu política exige cifrado en todo salto, se necesita dominio/certificado privado y configuración TLS adicional. No se afirma cifrado extremo a extremo de todos los saltos.
-- Los tokens en memoria reducen persistencia pero no eliminan el riesgo de XSS. Al recargar se pierde la sesión del frontend; Cognito puede reutilizar su sesión al pulsar Iniciar sesión. El logout no invalida instantáneamente un access token robado: verificadores JWT sin introspección pueden aceptarlo hasta su expiración (15 minutos).
-- No existe WAF adjunto. El gateway HTTP aplica límites de tasa, que no equivalen a protección completa contra abuso. Para WAF en la entrada API se debe diseñar REST API o una distribución CloudFront con origen protegido; no basta con añadir un Web ACL a un HTTP API.
-- Las listas actuales conservan el contrato EV1 y se cargan completas; la paginación es visual. Para volúmenes grandes, añadir paginación real en SQL/API antes de crecer. No se anuncian cifras de rendimiento que no se midieron.
-- @Version protege actualizaciones simultáneas dentro de transacciones. No se incluye un ETag/version obligatoria enviada por el cliente para detectar formularios abiertos mucho tiempo ni claves de idempotencia para crear solicitudes. Ante timeout de una escritura, revisar la lista antes de reintentar.
-- Se conserva el contrato DELETE de la aplicación original. No hay historial inmutable completo de ediciones/borrados ni auditoría regulatoria WORM. Se registran autor y fecha de creación/decisión y logs de acceso sin bearer tokens; ampliarlo según retención requerida.
-- El rol OIDC de **infraestructura** tiene permisos amplios sobre los servicios que aprovisiona; no es el rol runtime. En una organización con cuentas compartidas, aplicar permission boundaries/SCP y cuentas separadas por ambiente, reducir permisos según planes reales. Los roles tienen acceso a su prefijo de estado; los recursos AWS de servicios no están todos limitados por tags.
-- Quien pueda modificar el workflow protegido y desplegar tiene poder para cambiar la aplicación e infraestructura. Configura revisión de PR, checks requeridos y protección de Environments. Los escaneos en ramas de PR no deben recibir secrets de producción.
-- Las acciones e imágenes base usan versiones de release mantenibles, no todos sus SHA/digests. Para supply chain estricta, fijar cada acción a commit verificado y cada imagen base a digest verificado, con actualizaciones periódicas. Dependabot está configurado.
-- RDS rota su contraseña maestra administrada. Las tareas de migración nuevas obtienen el valor vigente; la app usa un secreto separado y no depende de esa rotación. La contraseña de aplicación **no tiene rotación automática**. Su rotación debe coordinar secreto, ALTER ROLE y reciclado de tareas; no cambies solo el secreto.
-- El código Flyway mantiene compatibilidad hacia atrás durante un despliegue. Una migración destructiva no se deshace automáticamente con rollback del contenedor.
-- La CA de RDS se descarga desde HTTPS oficial al construir la imagen. Al renovar certificados, reconstruye y despliega la imagen. Verifica permisos y cifrado KMS adicional si añades claves administradas por tu organización.
+Java no revalida el JWT y no usa Authorization para construir la identidad.
+Gateway sobrescribe X-Verified-User, X-Verified-Name y X-Verified-Scopes desde los claims ya verificados.
+X-Gateway-Request-Id permite correlacionar la llamada con el backend.
+El backend exige identidad Gateway, aplica reglas de negocio y no expone acceso directo.
+Grupos de seguridad: VPC Link → ALB interno → ECS → RDS. Mantener esta separación.
 
-## Pruebas de autorización mínimas antes de datos reales
+## Sesión HTTP
 
-Usa dos solicitantes diferentes y un aprobador. Comprueba: petición sin JWT→401; ID token→401; access token de otro client→401; cuenta sin grupos→403; lectura/edición/borrado ajeno→403; solicitante decidiendo→403; cuenta con ambos roles autoaprobando→403; segunda decisión→409; estado resuelto no editable. Prueba caracteres HTML en título y comentario: deben mostrarse como texto.
+session-ms es una Lambda separada del trigger, accesible por API Gateway.
+Canjea Authorization Code con verifier PKCE S256 y valida state contra una cookie de transacción cifrada.
+El callback fijo proviene de SESSION_API_ORIGIN, no del Host proporcionado por el cliente.
+Refresh Token cifrado con AES-256-GCM y clave aleatoria en Secrets Manager.
+Cookie host-only, Path=/auth, HttpOnly, Secure y SameSite=None.
+Cookie PKCE de transacción SameSite=Lax para el retorno GET desde Cognito.
+Rotación Cognito con período de gracia 10 segundos; no se amplía la fecha límite inicial de sesión.
+La respuesta de refresh contiene únicamente Access Token y expiresIn.
 
-Verifica tanto `/solicitudes` como su alias `/productos`. La UI oculta acciones según rol, pero la autoridad definitiva es el backend.
+POST /auth/refresh y /auth/logout exigen Origin exacto del frontend y X-CSRF: 1.
+CORS de Gateway permite solo los orígenes configurados, métodos y headers explícitos, con credenciales.
+El preflight OPTIONS de Gateway no exige JWT; no abre rutas de negocio sin autorización.
+No se impone Sec-Fetch-Site=same-origin porque Amplify y Gateway son cross-site en esta edición.
+No hay clave de origen CloudFront ni distribución propia.
+
+## Limitaciones
+
+Las URLs gratuitas son cross-site: SameSite=Lax no funcionaría para refresh por XHR.
+SameSite=None no obliga al navegador a aceptar cookies de terceros.
+La sesión requiere una política del navegador que permita esa cookie; probarlo explícitamente.
+El ZIP no configura dominios propios ni promete compatibilidad universal.
+Para producción, configurar HTTPS con frontend/API bajo un mismo sitio y revisar SameSite/CORS.
+No cambiar Refresh Token a localStorage, sessionStorage ni document.cookie.
+
+Access Token en memoria reduce persistencia, pero un XSS puede usarlo o llamar a la API.
+La CSP limita scripts a self y conexiones HTTPS a API Gateway de la región configurada (el interceptor envía Bearer solo a la URL exacta del ambiente); Angular requiere estilos inline.
+Evitar HTML no confiable, bypassSecurityTrustHtml y exposición de datos sensibles.
+
+## Configuración y secretos
+
+PUBLIC_ORIGIN: URL Amplify.
+SESSION_API_ORIGIN: URL API Gateway.
+COGNITO_DOMAIN y COGNITO_CLIENT_ID: datos públicos.
+COOKIE_SECRET_ARN: referencia privada; clave leída en runtime por Lambda.
+config.json y workflows no contienen tokens reales.
+Proteger estado remoto S3: contiene la clave de cifrado generada.
+Credenciales Learner Lab temporales solo como GitHub Secrets; no incluirlas en commits/capturas.
+
+Referencias:
+- https://docs.aws.amazon.com/cognito/latest/developerguide/user-pool-lambda-pre-token-generation.html
+- https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-jwt-authorizer.html
+- https://docs.aws.amazon.com/apigateway/latest/developerguide/http-api-cors.html
+- https://developer.mozilla.org/en-US/docs/Web/HTTP/Reference/Headers/Set-Cookie

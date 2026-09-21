@@ -12,6 +12,9 @@ output "deployment" {
     ECS_DESIRED_COUNT                = tostring(var.task_count)
     AMPLIFY_APP_ID                   = aws_amplify_app.front.id
     AMPLIFY_BRANCH                   = aws_amplify_branch.main.branch_name
+    FRONTEND_API_URL                 = aws_apigatewayv2_api.api.api_endpoint
+    SESSION_API_URL                  = aws_apigatewayv2_api.api.api_endpoint
+    SESSION_LAMBDA_NAME              = aws_lambda_function.session.function_name
     API_URL                          = aws_apigatewayv2_api.api.api_endpoint
     COGNITO_DOMAIN                   = local.cognito_domain
     COGNITO_CLIENT_ID                = aws_cognito_user_pool_client.web.id

@@ -1,12 +1,14 @@
 resource "aws_apigatewayv2_api" "api" {
   name          = local.name
   protocol_type = "HTTP"
+  # Solo el frontend conocido; nunca "*" con cookies.
   cors_configuration {
-    allow_origins  = local.origins
-    allow_methods  = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
-    allow_headers  = ["authorization", "content-type", "accept", "cache-control", "pragma", "x-requested-with"]
-    expose_headers = ["location"]
-    max_age        = 600
+    allow_origins     = local.origins
+    allow_credentials = true
+    allow_methods     = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    allow_headers     = ["Authorization", "Content-Type", "X-CSRF"]
+    expose_headers    = ["X-Gateway-Request-Id"]
+    max_age           = 300
   }
 }
 resource "aws_apigatewayv2_vpc_link" "backend" {
@@ -22,8 +24,14 @@ resource "aws_apigatewayv2_integration" "backend" {
   connection_type        = "VPC_LINK"
   connection_id          = aws_apigatewayv2_vpc_link.backend.id
   payload_format_version = "1.0"
-  request_parameters     = { "overwrite:path" = "$request.path" }
   timeout_milliseconds   = 29000
+  request_parameters = {
+    "overwrite:path"                        = "$request.path"
+    "overwrite:header.X-Verified-User"      = "$context.authorizer.claims.sub"
+    "overwrite:header.X-Verified-Name"      = "$context.authorizer.claims.verified_name"
+    "overwrite:header.X-Verified-Scopes"    = "$context.authorizer.claims.scope"
+    "overwrite:header.X-Gateway-Request-Id" = "$context.requestId"
+  }
 }
 resource "aws_apigatewayv2_authorizer" "jwt" {
   api_id           = aws_apigatewayv2_api.api.id
@@ -35,31 +43,23 @@ resource "aws_apigatewayv2_authorizer" "jwt" {
     issuer   = local.issuer
   }
 }
-
 locals {
-  # No usar ANY: también capturaría OPTIONS y obligaría al preflight CORS a
-  # presentar un JWT. API Gateway atiende automáticamente los OPTIONS que no
-  # tienen una ruta explícita cuando cors_configuration está habilitado.
-  api_routes = {
-    "GET /datos" = ["solicitudes/read"]
-
-    "GET /solicitudes"             = ["solicitudes/read"]
-    "GET /solicitudes/{proxy+}"    = ["solicitudes/read"]
-    "POST /solicitudes"            = ["solicitudes/write"]
-    "PUT /solicitudes/{proxy+}"    = ["solicitudes/write"]
-    "DELETE /solicitudes/{proxy+}" = ["solicitudes/write"]
-    "POST /solicitudes/{proxy+}"   = ["solicitudes/approve"]
-
-    # Alias conservado para compatibilidad con el proyecto original.
-    "GET /productos"             = ["solicitudes/read"]
-    "GET /productos/{proxy+}"    = ["solicitudes/read"]
-    "POST /productos"            = ["solicitudes/write"]
-    "PUT /productos/{proxy+}"    = ["solicitudes/write"]
-    "DELETE /productos/{proxy+}" = ["solicitudes/write"]
-    "POST /productos/{proxy+}"   = ["solicitudes/approve"]
+  solicitud_routes = {
+    "GET /datos"                      = ["solicitudes/read"]
+    "GET /solicitudes"                = ["solicitudes/read"]
+    "GET /solicitudes/mias"           = ["solicitudes/read"]
+    "GET /solicitudes/pendientes"     = ["solicitudes/approve"]
+    "GET /solicitudes/{id}"           = ["solicitudes/read"]
+    "POST /solicitudes"               = ["solicitudes/write"]
+    "PUT /solicitudes/{id}"           = ["solicitudes/write"]
+    "DELETE /solicitudes/{id}"        = ["solicitudes/write"]
+    "POST /solicitudes/{id}/decision" = ["solicitudes/approve"]
   }
+  api_routes = merge(local.solicitud_routes, {
+    for route, scopes in local.solicitud_routes : replace(route, "/solicitudes", "/productos") => scopes
+    if strcontains(route, "/solicitudes")
+  })
 }
-
 resource "aws_apigatewayv2_route" "api" {
   for_each             = local.api_routes
   api_id               = aws_apigatewayv2_api.api.id
@@ -84,6 +84,10 @@ resource "aws_apigatewayv2_stage" "main" {
   }
   access_log_settings {
     destination_arn = aws_cloudwatch_log_group.api.arn
-    format          = jsonencode({ requestId = "$context.requestId", route = "$context.routeKey", status = "$context.status", latency = "$context.responseLatency", integrationError = "$context.integrationErrorMessage" })
+    format = jsonencode({
+      requestId          = "$context.requestId", route = "$context.routeKey", status = "$context.status",
+      integrationLatency = "$context.integrationLatency", integrationStatus = "$context.integration.status",
+      integrationError   = "$context.integrationErrorMessage"
+    })
   }
 }

@@ -1,0 +1,180 @@
+
+<a class="skip" href="#main">Ir al contenido</a>
+<aside class="sidebar">
+  <a class="brand" href="/" aria-label="Solicitud, inicio">
+    <span class="brand-mark">s.</span>
+    <span>solicitud<span class="brand-sub">ESPACIO DE TRABAJO</span></span>
+  </a>
+  <div class="nav-label">GESTIÓN</div>
+  <nav aria-label="Navegación principal">
+    <button class="nav-item" [class.active]="!approval()" [disabled]="!session.active()" (click)="tab(false)" [attr.aria-current]="!approval()?'page':null">
+      <span aria-hidden="true">▤</span> Mis solicitudes
+    </button>
+    @if(canApprove()){
+      <button class="nav-item" [class.active]="approval()" (click)="tab(true)" [attr.aria-current]="approval()?'page':null">
+        <span aria-hidden="true">✓</span> Por aprobar <span class="count">{{summary().pendientes}}</span>
+      </button>
+    }
+  </nav>
+  <div class="sidebar-note">
+    <span class="note-icon" aria-hidden="true">◎</span>
+    <strong>Cada decisión cuenta.</strong>
+    <p>Consulta tus solicitudes y sigue su avance desde este espacio.</p>
+  </div>
+  <div class="sidebar-bottom">
+    <span class="avatar" aria-hidden="true">S</span>
+    <div><strong>{{session.active()?(summary().roles.join(' · ')||'Tu espacio'):'Tu espacio'}}</strong>
+      <span>{{session.active()?'Sesión activa':'Inicia sesión para continuar'}}</span></div>
+  </div>
+</aside>
+
+<div class="workspace">
+  <header class="topbar">
+    <span>Mi organización <span class="crumb">/</span> Gestión de solicitudes</span>
+    <div class="session-actions">
+      <span class="session-badge">{{session.active()?'Sesión activa':'Acceso seguro'}}</span>
+      @if(session.active()&&session.config.authEnabled){
+        <button class="btn button small ghost" (click)="logout()">Cerrar sesión</button>
+      }
+    </div>
+  </header>
+  <main id="main">
+    @if(!session.active()){
+      <section class="login-grid">
+        <div class="login-copy">
+          <p class="eyebrow">TU TRABAJO, EN ORDEN</p>
+          <h1>Tus solicitudes,<br>en un solo lugar.</h1>
+          <p>Crea, consulta y resuelve solicitudes con acceso seguro y seguimiento de cada decisión.</p>
+          <div class="trust"><span>✓ Identidad Cognito</span><span>✓ API Gateway</span><span>✓ Sesión protegida</span></div>
+        </div>
+        <div class="login-card">
+          <span class="brand-mark" aria-hidden="true">s.</span>
+          <h2>Bienvenido a tu espacio</h2>
+          <p>Inicia sesión con tu cuenta de la organización para continuar.</p>
+          <button class="btn button primary" (click)="session.login()">Iniciar sesión <span aria-hidden="true">→</span></button>
+          @if(session.notice()){
+            <p class="alert error" role="alert">{{session.notice()}}</p>
+            <button class="btn button secondary recovery" (click)="recover()">Reintentar sesión</button>
+          }
+          @if(error()){<p class="alert error" role="alert">{{error()}}</p>}
+          <small class="security-note">Autenticación administrada por Amazon Cognito.<br>Authorization Code + PKCE.</small>
+        </div>
+      </section>
+    }@else{
+      @if(!session.config.authEnabled){
+        <section class="local-panel">
+          <div><strong>Demostración local</strong><p>Identidades de prueba; no usa cuentas reales.</p></div>
+          <label>Usuario<input class="form-control" [ngModel]="session.demoUser()" (ngModelChange)="session.demoUser.set($event)" aria-label="Usuario demo"></label>
+          <label>Rol<select class="form-select" [ngModel]="session.demoRole()" (ngModelChange)="session.demoRole.set($event)"><option>SOLICITANTE</option><option>APROBADOR</option></select></label>
+        </section>
+      }
+      <section class="page-heading">
+        <div><p class="eyebrow">TU TRABAJO, EN ORDEN</p><h1>{{approval()?'Por aprobar':'Mis solicitudes'}}</h1>
+          <p class="muted">{{approval()?'Revisa las solicitudes pendientes y registra tu decisión.':'Crea una solicitud y sigue cada paso hasta su resolución.'}}</p></div>
+        @if(canCreate()){<button class="btn button primary" (click)="newRequest()" [disabled]="busy()"><span aria-hidden="true">＋</span> Nueva solicitud</button>}
+      </section>
+
+      @if(error()){<div class="alert error" role="alert">{{error()}}</div>}
+      @if(message()){<div class="alert banner success" role="status"><span>{{message()}}</span><button class="icon-button" (click)="message.set('')" aria-label="Cerrar aviso">×</button></div>}
+
+      <section class="stats" aria-label="Resumen de solicitudes">
+        <article class="stat"><div><span>Pendientes</span><span class="stat-icon amber" aria-hidden="true">◷</span></div><strong>{{summary().pendientes}}</strong><small>En espera de una decisión</small></article>
+        <article class="stat"><div><span>Aprobadas</span><span class="stat-icon green" aria-hidden="true">✓</span></div><strong>{{summary().aprobadas}}</strong><small>Solicitudes aceptadas</small></article>
+        <article class="stat"><div><span>Rechazadas</span><span class="stat-icon rose" aria-hidden="true">−</span></div><strong>{{summary().rechazadas}}</strong><small>Con respuesta del aprobador</small></article>
+        <article class="stat accent"><div><span>Mis solicitudes</span><span class="stat-icon blue" aria-hidden="true">▤</span></div><strong>{{summary().mias}}</strong><small>Todas tus solicitudes</small></article>
+      </section>
+
+      <section class="panel" aria-labelledby="table-title">
+        <div class="panel-heading">
+          <div><h2 id="table-title">Bandeja de solicitudes</h2><p class="muted">Tu información, disponible en un solo lugar.</p></div>
+          <button class="btn button secondary small" (click)="load()" [disabled]="busy()"><span aria-hidden="true">↻</span> Actualizar</button>
+        </div>
+        <div class="filters">
+          <label class="search"><span aria-hidden="true">⌕</span><input class="form-control" type="search" placeholder="Buscar por título, tipo o solicitante" aria-label="Buscar solicitudes" [ngModel]="search()" (ngModelChange)="search.set($event);page.set(1)"></label>
+          <label class="filter-label">Estado<select class="form-select" [ngModel]="status()" (ngModelChange)="status.set($event);page.set(1)"><option value="">Todos los estados</option><option value="PENDIENTE">Pendiente</option><option value="APROBADA">Aprobada</option><option value="RECHAZADA">Rechazada</option></select></label>
+        </div>
+        @if(busy()){
+          <div class="loading busy-label" role="status"><span class="spinner-border spinner-border-sm" aria-hidden="true"></span> Actualizando solicitudes…</div>
+        }@else{
+          <div class="table-scroll">
+            <table class="table table-hover align-middle">
+              <caption class="visually-hidden">Solicitudes y acciones disponibles</caption>
+              <thead><tr><th scope="col">Solicitud</th><th scope="col">Solicitante</th><th scope="col">Período</th><th scope="col">Estado</th><th scope="col" class="right">Acciones</th></tr></thead>
+              <tbody>
+                @for(s of visible();track s.id){
+                  <tr>
+                    <td><strong class="request-title">{{s.titulo}}</strong><small class="request-meta">{{s.tipo}} · {{s.id.substring(0,8)}}</small></td>
+                    <td><div class="person"><span class="person-avatar" aria-hidden="true">{{s.solicitanteNombre.substring(0,1).toUpperCase()}}</span><span class="person-name">{{s.solicitanteNombre}}</span></div></td>
+                    <td class="period">{{s.fechaInicio||'Sin fecha'}}<br>@if(s.fechaFin){<span>hasta {{s.fechaFin}}</span>}</td>
+                    <td><span class="status" [class.status-PENDIENTE]="s.estado==='PENDIENTE'" [class.status-APROBADA]="s.estado==='APROBADA'" [class.status-RECHAZADA]="s.estado==='RECHAZADA'">{{s.estado}}</span></td>
+                    <td><div class="row-actions">
+                      <button class="link-button" (click)="detail(s)">Ver</button>
+                      @if(!approval()&&canCreate()&&s.estado==='PENDIENTE'){
+                        <button class="link-button" (click)="edit(s)">Editar</button><button class="link-button destructive" (click)="remove(s)">Eliminar</button>
+                      }
+                      @if(approval()&&canApprove()&&s.estado==='PENDIENTE'){
+                        <button class="btn button primary small" (click)="decisionFor(s)">Resolver</button>
+                      }
+                    </div></td>
+                  </tr>
+                }@empty{
+                  <tr><td colspan="5" class="empty-inline"><div class="empty-icon" aria-hidden="true">▤</div><h3>No hay solicitudes para mostrar</h3><p class="muted mt-2">Crea una nueva solicitud o cambia los filtros de búsqueda.</p></td></tr>
+                }
+              </tbody>
+            </table>
+          </div>
+        }
+        <footer class="table-footer">
+          <span role="status">{{filtered().length}} solicitudes</span>
+          <div class="pagination">
+            <button class="btn button small ghost" [disabled]="page()<=1" (click)="page.set(page()-1)" aria-label="Página anterior">Anterior</button>
+            <span>{{page()>pages()?pages():page()}} / {{pages()}}</span>
+            <button class="btn button small ghost" [disabled]="page()>=pages()" (click)="page.set(page()+1)" aria-label="Página siguiente">Siguiente</button>
+          </div>
+        </footer>
+      </section>
+      <footer class="page-footer"><span>Solicitud · Gestión y seguimiento</span><span class="footer-security">✓ Las llamadas pasan por API Gateway</span></footer>
+    }
+  </main>
+</div>
+
+@if(modal()){
+  <div class="overlay">
+    <section class="dialog" role="dialog" aria-modal="true" aria-labelledby="dialog-title" tabindex="-1" (keydown)="dialogKeys($event)">
+      <header class="dialog-header">
+        <div><p class="eyebrow">{{modal()==='decision'?'REVISIÓN':'SOLICITUD'}}</p><h2 id="dialog-title">{{modal()==='form'?(selected()?'Editar solicitud':'Nueva solicitud'):modal()==='decision'?'Resolver solicitud':selected()?.titulo}}</h2></div>
+        <button type="button" class="icon-button" (click)="modal.set(null)" aria-label="Cerrar">×</button>
+      </header>
+      @if(modal()==='form'){
+        <form #requestForm="ngForm" (ngSubmit)="save()">
+          <div class="dialog-body">
+            <label>Tipo de solicitud<select class="form-select" name="tipo" [(ngModel)]="form.tipo" required>@for(t of types;track t){<option [value]="t">{{t}}</option>}</select></label>
+            <label>Título<input class="form-control" name="titulo" [(ngModel)]="form.titulo" required maxlength="140" placeholder="Describe brevemente lo que necesitas"></label>
+            <label>Descripción<textarea class="form-control" name="descripcion" [(ngModel)]="form.descripcion" required maxlength="2000" rows="4" placeholder="Incluye los detalles que ayudarán a revisar tu solicitud"></textarea></label>
+            <div class="form-grid"><label>Desde <span class="optional">(opcional)</span><input class="form-control" name="inicio" type="date" [(ngModel)]="form.fechaInicio"></label><label>Hasta <span class="optional">(opcional)</span><input class="form-control" name="fin" type="date" [(ngModel)]="form.fechaFin"></label></div>
+            <p class="field-note">Podrás editar o eliminar la solicitud mientras esté pendiente.</p>
+            @if(error()){<p class="alert error mt-3" role="alert">{{error()}}</p>}
+          </div>
+          <footer class="dialog-footer"><button type="button" class="btn button ghost" (click)="modal.set(null)">Cancelar</button><button class="btn button primary" type="submit" [disabled]="requestForm.invalid||busy()">Guardar solicitud</button></footer>
+        </form>
+      }@else if(modal()==='decision'){
+        <form #decisionForm="ngForm" (ngSubmit)="decide()">
+          <div class="dialog-body">
+            <div class="decision-summary"><strong>{{selected()?.titulo}}</strong><p class="muted mt-1">{{selected()?.solicitanteNombre}}</p></div>
+            <label>Decisión<select class="form-select" name="decision" [(ngModel)]="decision"><option value="APROBAR">Aprobar</option><option value="RECHAZAR">Rechazar</option></select></label>
+            <label>Comentario<textarea class="form-control" name="comentario" [(ngModel)]="comment" required maxlength="1000" rows="4" placeholder="Explica el motivo de tu decisión"></textarea></label>
+            <p class="field-note">La decisión quedará registrada junto a tu identidad.</p>
+            @if(error()){<p class="alert error mt-3" role="alert">{{error()}}</p>}
+          </div>
+          <footer class="dialog-footer"><button type="button" class="btn button ghost" (click)="modal.set(null)">Cancelar</button><button class="btn button primary" type="submit" [disabled]="decisionForm.invalid||busy()">Registrar decisión</button></footer>
+        </form>
+      }@else{
+        <div class="dialog-body">
+          <p class="eyebrow">{{selected()?.tipo}} · {{selected()?.estado}}</p><p class="dialog-description">{{selected()?.descripcion}}</p>
+          <dl class="detail-grid"><div><dt>Solicitante</dt><dd>{{selected()?.solicitanteNombre}}</dd></div><div><dt>Período</dt><dd>{{selected()?.fechaInicio||'—'}} → {{selected()?.fechaFin||'—'}}</dd></div><div><dt>ID de solicitud</dt><dd>{{selected()?.id}}</dd></div>@if(selected()?.comentarioAprobador){<div><dt>Comentario del aprobador</dt><dd>{{selected()?.comentarioAprobador}}</dd></div>}</dl>
+        </div>
+        <footer class="dialog-footer"><button type="button" class="btn button secondary" (click)="modal.set(null)">Cerrar</button></footer>
+      }
+    </section>
+  </div>
+}

@@ -17,3 +17,4 @@
 *.key
 *.zip
 .DS_Store
+**/.angular/

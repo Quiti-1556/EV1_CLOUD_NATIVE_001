@@ -20,7 +20,7 @@ services:
       DB_URL: jdbc:postgresql://db:5432/solicitudes
       DB_USER: solicitudes_app
       DB_PASSWORD: ${POSTGRES_PASSWORD:-solicitudes_dev_only}
-      APP_SECURITY_ENABLED: "false"
+      APP_IDENTITY_MODE: "demo"
       CORS_ALLOWED_ORIGINS: http://localhost:4200
     depends_on:
       db:

@@ -44,7 +44,7 @@ resource "aws_iam_role_policy" "deploy" {
   policy = jsonencode({ Version = "2012-10-17", Statement = [
     { Effect = "Allow", Action = [
       "ec2:*", "ecs:*", "ecr:*", "elasticloadbalancing:*", "rds:*", "cognito-idp:*",
-      "apigateway:*", "amplify:*", "logs:*", "cloudwatch:*", "secretsmanager:*", "ssm:*", "sts:GetCallerIdentity"
+      "apigateway:*", "amplify:*", "lambda:*", "logs:*", "cloudwatch:*", "secretsmanager:*", "ssm:*", "sts:GetCallerIdentity"
     ], Resource = "*" },
     { Effect = "Allow", Action = ["s3:ListBucket", "s3:GetBucketLocation"], Resource = aws_s3_bucket.state.arn },
     { Effect = "Allow", Action = ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"], Resource = "${aws_s3_bucket.state.arn}/solicitud/${lower(each.key)}/*" },
@@ -52,7 +52,7 @@ resource "aws_iam_role_policy" "deploy" {
       "iam:CreateRole", "iam:DeleteRole", "iam:GetRole", "iam:UpdateAssumeRolePolicy", "iam:PutRolePolicy",
       "iam:GetRolePolicy", "iam:DeleteRolePolicy", "iam:ListRolePolicies", "iam:ListAttachedRolePolicies", "iam:ListInstanceProfilesForRole", "iam:TagRole", "iam:UntagRole"
     ], Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project}-${lower(each.key)}-*" },
-    { Effect = "Allow", Action = ["iam:PassRole"], Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project}-${lower(each.key)}-*", Condition = { StringEquals = { "iam:PassedToService" = "ecs-tasks.amazonaws.com" } } },
+    { Effect = "Allow", Action = ["iam:PassRole"], Resource = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project}-${lower(each.key)}-*", Condition = { StringEquals = { "iam:PassedToService" = ["ecs-tasks.amazonaws.com", "lambda.amazonaws.com"] } } },
     { Effect = "Allow", Action = ["iam:CreateServiceLinkedRole"], Resource = "*", Condition = { StringEquals = { "iam:AWSServiceName" = ["ecs.amazonaws.com", "elasticloadbalancing.amazonaws.com", "rds.amazonaws.com", "cognito-idp.amazonaws.com", "amplify.amazonaws.com"] } } }
   ] })
 }

@@ -1,55 +1,40 @@
 package cl.solicitudes.security;
 
-import java.util.Collection;
-import java.util.HashSet;
-import java.util.Locale;
-import java.util.Set;
+import java.util.*;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
-import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationToken;
 import org.springframework.stereotype.Component;
 
+/** Identidad de Gateway; NO lee, decodifica ni valida el JWT. */
 @Component
 public class CurrentUserService {
-    private final boolean securityEnabled;
+    private final String mode;
     private final ObjectProvider<HttpServletRequest> requests;
-
-    public CurrentUserService(
-            @Value("${app.security.enabled:true}") boolean securityEnabled,
-            ObjectProvider<HttpServletRequest> requests) {
-        this.securityEnabled = securityEnabled;
-        this.requests = requests;
+    public CurrentUserService(@Value("${app.identity-mode:gateway}") String mode,
+                              ObjectProvider<HttpServletRequest> requests) {
+        if(!Set.of("gateway","demo").contains(mode)) throw new IllegalArgumentException("Modo de identidad inválido");
+        this.mode=mode; this.requests=requests;
     }
-    public CurrentUser get(){
-        if(!securityEnabled){
-            String id = header("X-Demo-User", "solicitante.demo");
-            String role = header("X-Demo-Role", "SOLICITANTE").toUpperCase(Locale.ROOT);
-            String name = header("X-Demo-Name", role.equals("APROBADOR") ? "Aprobador Demo" : "Solicitante Demo");
-            return new CurrentUser(id,name,id+"@local.test",Set.of(role));
+    public CurrentUser get() {
+        if("demo".equals(mode)){
+            String id=header("X-Demo-User","solicitante.demo");
+            String role=header("X-Demo-Role","SOLICITANTE").toUpperCase(Locale.ROOT);
+            if(!Set.of("SOLICITANTE","APROBADOR").contains(role)) throw new IllegalArgumentException("Rol demo inválido");
+            return new CurrentUser(id,header("X-Demo-Name",id),id+"@local.test",Set.of(role));
         }
-        Authentication a=SecurityContextHolder.getContext().getAuthentication();
-        if(!(a instanceof JwtAuthenticationToken jwt)) throw new IllegalStateException("No hay identidad JWT autenticada");
-        var token=jwt.getToken();
-        String id=token.getSubject();
-        String email=first(token.getClaimAsString("email"), first(token.getClaimAsString("username"), id));
-        String name=first(token.getClaimAsString("name"), email);
+        String id=header("X-Verified-User","");
+        String scopes=header("X-Verified-Scopes","");
+        if(id.isBlank()||scopes.isBlank()) throw new IllegalStateException("Falta identidad de Gateway");
         Set<String> roles=new HashSet<>();
-        Object groups=token.getClaims().get("cognito:groups");
-        if(groups instanceof Collection<?> c) c.forEach(x ->
-                roles.add(String.valueOf(x).toUpperCase(Locale.ROOT)));
-        // Sin grupo explícito no se conceden permisos.
-        return new CurrentUser(id,name,email,Set.copyOf(roles));
+        Set<String> granted=new HashSet<>(Arrays.asList(scopes.split("\\s+")));
+        if(granted.contains("solicitudes/write")) roles.add("SOLICITANTE");
+        if(granted.contains("solicitudes/approve")) roles.add("APROBADOR");
+        return new CurrentUser(id,header("X-Verified-Name",id),"",Set.copyOf(roles));
     }
-    private String header(String key, String fallback) {
-        HttpServletRequest request = requests.getIfAvailable();
-        if (request == null) {
-            return fallback;
-        }
-        String value = request.getHeader(key);
-        return value == null || value.isBlank() ? fallback : value.trim();
+    private String header(String key,String fallback){
+        HttpServletRequest r=requests.getIfAvailable();
+        String v=r==null?null:r.getHeader(key);
+        return v==null||v.isBlank()?fallback:v.trim();
     }
-    private String first(String a,String b){ return a==null||a.isBlank()?b:a; }
 }

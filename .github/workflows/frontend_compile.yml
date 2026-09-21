@@ -1,4 +1,4 @@
-name: Frontend Compile
+name: Frontend Compile Angular
 on:
   pull_request:
     paths: ['frontend/**', '.github/workflows/frontend_compile.yml']
@@ -11,7 +11,7 @@ permissions:
 jobs:
   compile:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,3 +23,7 @@ jobs:
         run: npm ci --ignore-scripts
       - working-directory: frontend
         run: npm test && npm run build
+      - uses: actions/upload-artifact@v4
+        with:
+          name: angular-frontend
+          path: frontend/dist/frontend/browser/

@@ -10,5 +10,5 @@ db_instance_class   = "db.t4g.micro"
 task_count          = 1
 # Learner Lab: descomenta AMBOS y reemplaza ACCOUNT_ID.
 existing_execution_role_arn = "arn:aws:iam::674334406872:role/LabRole"
-existing_task_role_arn = "arn:aws:iam::674334406872:role/LabRole"
+existing_task_role_arn      = "arn:aws:iam::674334406872:role/LabRole"
 existing_lambda_role_arn    = "arn:aws:iam::674334406872:role/LabRole"

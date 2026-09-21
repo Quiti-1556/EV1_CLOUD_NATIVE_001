@@ -1,69 +1,161 @@
-# Operación
+# Paso a paso: GitHub y despliegue completo sin CloudFront propio
 
-## Flujo de publicación
+## 1. Resguardar y reemplazar el proyecto
 
-1. Validar configuración y crear/aplicar plan Terraform con lock S3.
-2. Terraform crea ECS con cero tareas; registra plantilla, no intenta ejecutar `:bootstrap`.
-3. Construir imagen y ejecutar pruebas; subir etiqueta única a ECR; resolver digest.
-4. Leer desde SSM las revisiones exactas de plantilla administradas por Terraform.
-5. Crear una contraseña aleatoria en el secreto aplicación si no tiene versión AWSCURRENT.
-6. Registrar/ejecutar tarea de migración privada con la nueva imagen. Flyway migra y aprovisiona el rol SQL de aplicación. Exigir exitCode 0.
-7. Registrar tarea runtime sustituyendo solo imagen por digest; actualizar servicio al task_count configurado.
-8. Esperar estabilidad y verificar ARN de revisión, tareas saludables y rollout COMPLETED. Un rollback a versión anterior no se reporta como éxito.
-9. Generar configuración pública del frontend, probar, compilar, subir ZIP y esperar Amplify SUCCEED.
-10. Comprobar página accesible y rechazo de rutas sin token.
+Usar el repositorio y bucket de estado EXISTENTES. No borrar tfstate, RDS ni usuarios.
+Esta edición conserva modelos, migraciones y nombres de infraestructura del entregable original.
 
-No se modifican IPs de integraciones. Terraform mantiene red, roles, variables y plantillas; scripts mantienen la revisión e imagen activa y número de tareas. Después de modificar infraestructura, ejecuta `deploy.sh`, no únicamente `terraform apply`: de lo contrario los cambios de plantilla no llegan al servicio. La concurrencia compartida de workflows evita carreras; no ejecutes manualmente dos despliegues simultáneos del mismo ambiente.
+1. Respaldar tu copia o trabajar en una rama nueva.
+2. Descomprimir el ZIP.
+3. Copiar el CONTENIDO de DSY1107-EP1-Acevedo-Sin-CloudFront a la raíz del repositorio.
+4. Incluir .github y .gitignore. No subir una carpeta anidada que deje .github fuera de la raíz.
+5. No reemplazar el directorio .git de tu repositorio.
 
-## Comandos independientes
+Git no elimina archivos viejos por copiar un ZIP. Retirar los siguientes si todavía existen:
 
 ```bash
-bash scripts/infra.sh dev plan
-bash scripts/infra.sh dev apply
-bash scripts/publicar-ecs.sh dev
-bash scripts/deploy-frontend.sh dev
-bash scripts/smoke.sh dev
-
-# Logs
-aws logs tail /ecs/solicitud-dev --follow --region us-east-1
-# Eventos ECS
-aws ecs describe-services --cluster solicitud-dev --services solicitud-dev-backend --query 'services[0].events[:10]'
-# Revisiones registradas
-aws ecs list-task-definitions --family-prefix solicitud-dev-backend --sort DESC
-# Rollback: usar ARN existente devuelto por AWS
-bash scripts/rollback-ecs.sh dev ARN_COMPLETO_DE_LA_REVISION
+git status --short
+git rm --ignore-unmatch backend/src/main/java/cl/solicitudes/security/CognitoAccessTokenValidator.java backend/src/test/java/cl/solicitudes/security/CognitoAccessTokenValidatorTest.java
+git rm --ignore-unmatch frontend/build.mjs frontend/src/js/app.js frontend/src/js/auth.js frontend/tests/auth.test.mjs frontend/src/css/styles.css backend-build.log
 ```
 
-Para migraciones fallidas, busca logs del contenedor de la tarea efímera; no se promueve el runtime nuevo. Si Flyway aplicó cambios antes de fallar otra operación, corrige la causa y reintenta con una migración nueva cuando corresponda; no borres el historial para ocultar el fallo.
+Si git informa modificaciones locales en esos archivos, revisar/resguardar antes; no usar -f.
+terraform/cloudfront.tf debe contener SOLO comentarios de retiro; se incluye para reemplazar el archivo viejo al copiar.
+No conservar recursos CloudFront en otro .tf.
 
-## Costos y disponibilidad
+## 2. Revisar cuenta y roles
 
-Se factura Amplify según uso, Fargate por tareas, ALB, NAT Gateway (hora y tráfico), RDS/almacenamiento/backups, Secrets Manager, API Gateway, ECR y CloudWatch. PROD tiene dos NAT y RDS Multi-AZ; es más resistente y más costoso. No hay presupuestos numéricos ni supuestos de gratuidad. Configura AWS Budgets con límites de tu cuenta antes de mantener los ambientes encendidos.
+En terraform/environments/dev.tfvars, qa.tfvars y prod.tfvars revisar los tres ARN LabRole.
+La cuenta incluida es 674334406872, correspondiente al entregable; cambiarla si el laboratorio rotó la cuenta.
+Conservar roles actuales si corresponden: no crear roles arbitrarios ni modificar permisos del laboratorio.
+Lambda sesión necesita un rol autorizado para Lambda, Secrets Manager y CloudWatch Logs.
+Este código no pide cloudfront:ListCachePolicies ni cloudfront:ListOriginRequestPolicies.
+Amplify usa hosting administrado: no se gestiona una distribución propia.
 
-DEV/QA usan un NAT; si falla su zona puede afectar salida de tareas en ambas zonas. PROD usa un NAT por zona y dos tareas. No se incluyen autoscaling, despliegue multirregión ni recuperación automática entre regiones.
+Si YA se aplicó la edición CloudFront y esos recursos están en el estado, Terraform puede intentar refrescarlos/eliminarlos al retirarlos del código.
+Una denegación de permisos debe resolverla un administrador con autoridad para retirar esos recursos.
+No hacer terraform state rm para ocultar recursos ni recrear el estado.
+Si el error ocurrió durante plan antes de crear CloudFront, esta edición no crea ni consulta sus políticas.
 
-## Eliminación planificada
+## 3. Configurar GitHub
 
-No se incluye un comando automático que borre todos los recursos. RDS conserva snapshot final, ECR exige vaciar imágenes explícitamente y los secretos mantienen recuperación de siete días. PROD bloquea borrado de DB/Cognito/ALB y el bucket bootstrap tiene prevent_destroy.
+Settings → Environments → crear/revisar DEV. Después QA y PROD según corresponda.
 
-Para retirar un ambiente, revisa/exporta lo que necesites, prepara respaldo y revisa un plan de destroy con la región y estado correctos. Si ya existe el identificador de snapshot `<proyecto>-<ambiente>-final`, elige un nuevo identificador antes del siguiente retiro. Eliminar/provisionar de inmediato el mismo nombre de secreto puede fallar durante su ventana de recuperación; restaura el secreto o usa un nombre nuevo y reconcilia el estado. No borres locks S3 de un despliegue activo.
+| Tipo | Nombre | Valor |
+|---|---|---|
+| Variable | AWS_REGION | us-east-1 o tu región actual |
+| Variable | TF_STATE_BUCKET | Bucket existente de tu estado, por ejemplo amzn-s3-aronbuckett si sigue siendo el correcto |
+| Variable opcional | AWS_ROLE_ARN | Solo si usas OIDC autorizado |
+| Secret | AWS_ACCESS_KEY_ID | Credencial vigente Learner Lab |
+| Secret | AWS_SECRET_ACCESS_KEY | Credencial vigente Learner Lab |
+| Secret | AWS_SESSION_TOKEN | Token de sesión vigente Learner Lab |
 
-## Problemas frecuentes
+Si usas credenciales temporales, dejar AWS_ROLE_ARN vacío para no seleccionar un rol OIDC antiguo.
+Los secretos del laboratorio caducan; renovar los tres juntos cuando corresponda.
+No introducir Access Token o Refresh Token de usuarios en YAML, config.json ni GitHub.
+API_URL, client ID, callback y configuración Angular se leen automáticamente desde outputs Terraform.
+Conservar la misma clave remota de estado: solicitud/dev/terraform.tfstate (qa/prod equivalentes).
+Si tu repositorio original cambió esa clave, verificar scripts/terraform-init.sh antes del deploy.
 
-| Síntoma | Comprobación |
-|---|---|
-| OIDC no puede asumir rol | Repo/Environment exactos, audiencia sts.amazonaws.com, variable AWS_ROLE_ARN y rama permitida en Environment. |
-| Acceso denegado en Lab | Las tres credenciales no expiraron; roles ECS existentes tienen permisos; el laboratorio permite los servicios. |
-| redirect_mismatch | La URL abierta coincide exactamente con output frontend_url y redirectUri termina en `/`. |
-| 403 después del login | Usuario pertenece a SOLICITANTE o APROBADOR; al cambiar grupos iniciar sesión otra vez. |
-| ECS no descarga imagen | NAT/rutas/salida 443, rol ejecución y ECR; arquitectura linux/amd64. |
-| Migración no puede leer secreto | Permisos de ejecución a ambos secretos; AWSCURRENT aplicación creada. |
-| Runtime SQL falla | Migración exitosa, grants de solicitudes_app, certificado CA y hostname RDS, contraseña sincronizada. |
-| Backend hace rollback | Revisar CloudWatch y salud del target; esperar no basta, la revisión solicitada debe quedar activa. |
-| Front no inicia | config.json existe en assets; configuración AWS HTTPS, CSP con orígenes exactos; no publicar config.local.json. |
-| VPC Link recién creado responde lento | Esperar disponibilidad; puede tardar varios minutos, también al reactivarse tras inactividad prolongada. |
-| Scan bloquea deploy | Revisar CVE de severidad HIGH/CRITICAL y actualizar dependencia/imagen; no ignorarlo sin evaluación. |
+## 4. Subir cambios
 
-## Verificaciones adicionales de datos
+Desde la raíz de tu repositorio:
 
-El perfil runtime AWS desactiva Flyway y valida el esquema. Si se agregan nuevas tablas, añade permisos puntuales del rol runtime en DatabaseBootstrap y pruebas correspondientes; no concedas CREATE o privilegios administrativos al runtime. Antes de cambios incompatibles, define estrategia expand/contract para mantener la versión antigua operativa durante rolling deployment.
+```bash
+git status --short
+node scripts/test-policy.mjs
+git add .
+git diff --cached --stat
+git commit -m "Angular Cognito Gateway y sesión HttpOnly sin CloudFront propio"
+git push origin TU_RAMA
+```
+
+Revisar antes que no se agreguen secretos, tfstate, node_modules ni builds.
+Si trabajaste en una rama nueva, abrir PR hacia main y revisar los workflows.
+El deploy automático ocurre por push/merge a main; también puede ejecutarse manualmente.
+No usar push --force.
+Si falló un workflow de un commit viejo, ejecutar sobre el commit nuevo: Re-run no cambia su código.
+
+## 5. Ejecutar deploy completo
+
+GitHub → Actions → Deploy completo → Run workflow → branch main → environment DEV.
+
+El pipeline:
+1. Verifica política: backend sin JWT, Gateway con scopes y CORS, cookies/PKCE.
+2. Prueba Angular y construye con Angular CLI.
+3. Prueba Lambda de grupos.
+4. Prueba y empaqueta Lambda de sesión Node 22.
+5. Maven verify con Java 21.
+6. Terraform init, validate, plan y apply usando estado remoto.
+7. Ejecuta migración Flyway y despliega imagen ECS; espera servicio saludable.
+8. Genera configuración Angular pública desde Terraform, compila y publica en Amplify.
+9. Prueba frontend, 401 sin JWT, CSRF, inicio PKCE y preflight CORS.
+10. Verifica vínculo Cognito V2 y scopes del Lambda desplegado mediante invocación controlada.
+
+Ese smoke no sustituye el login real ni valida compatibilidad de cookies en tu navegador.
+Ante AccessDenied, detenerse y solicitar al administrador permisos para el recurso concreto.
+No borrar RDS ni usar terraform destroy como solución.
+Deploy Frontend aislado no crea sesión/CORS nuevos: primero Deploy completo.
+
+## 6. Abrir Angular
+
+Los outputs aparecen en el resumen del deploy.
+También puedes consultarlos localmente con credenciales y Terraform:
+
+```bash
+export AWS_REGION=us-east-1
+export TF_STATE_BUCKET=TU_BUCKET_EXISTENTE
+bash scripts/terraform-init.sh dev
+export TF_DATA_DIR="$PWD/terraform/.terraform-dev"
+terraform -chdir=terraform output -raw frontend_url
+terraform -chdir=terraform output -json deployment
+```
+
+frontend_url: https://main.APP_ID.amplifyapp.com.
+API_URL y FRONTEND_API_URL: https://API_ID.execute-api.REGION.amazonaws.com, SIN /api.
+Callback Cognito: API_URL/auth/callback.
+El botón de login Angular abre API_URL/auth/login; la Lambda redirige a Cognito.
+Cognito vuelve a la Lambda callback, que coloca la cookie y regresa a Angular.
+
+## 7. Comprobar cookies del navegador
+
+La edición usa URLs gratuitas de sitios distintos.
+No podemos garantizar refresh si el navegador bloquea cookies de terceros.
+Para la demo, usar un perfil normal de navegador que permita la cookie para este sitio, si tu política lo permite.
+Revisar F12 → Network → POST API_URL/auth/refresh y el motivo de bloqueo en Cookies/Issues.
+No desactivar HTTPS, HttpOnly, CSRF ni guardar el Refresh Token en JavaScript.
+Si el login finaliza pero refresh da 401, comprobar primero la cookie y su bloqueo.
+Para producción sin esta dependencia, configurar frontend/API con dominios HTTPS del mismo sitio; este ZIP no los crea.
+
+## 8. Usuarios y evidencias
+
+Conservar usuarios existentes en Cognito. Grupos: SOLICITANTE y APROBADOR.
+Crear solo usuarios que falten y usar correos propios/controlados:
+
+```bash
+bash scripts/crear-usuario.sh dev TU_CORREO SOLICITANTE
+bash scripts/crear-usuario.sh dev OTRO_CORREO APROBADOR
+```
+
+Completar contraseña temporal y MFA TOTP. No mostrar contraseña, QR ni tokens en capturas.
+Seguir EVIDENCIAS.md y completar variables de la colección Postman.
+
+## 9. Desarrollo local
+
+```bash
+bash scripts/local.sh
+```
+
+Requiere Docker. http://localhost:4200 usa identidades demo; no emula Cognito/cookies seguras.
+No publicar config.local.json en Amplify; el script de publicación lo rechaza.
+En AWS APP_IDENTITY_MODE=gateway es obligatorio.
+
+Pruebas independientes, con Node 24 y Java 21:
+
+```bash
+node scripts/test-policy.mjs
+node --test user-token-ms/index.test.mjs
+(cd session-ms && npm ci --ignore-scripts && npm test && npm run build)
+(cd frontend && npm ci --ignore-scripts && npm test && npm run build)
+(cd backend && mvn --batch-mode --no-transfer-progress verify)
+```

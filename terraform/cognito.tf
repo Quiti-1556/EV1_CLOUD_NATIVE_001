@@ -56,7 +56,7 @@ resource "aws_cognito_user_pool_client" "web" {
     "${aws_cognito_resource_server.solicitudes.identifier}/approve"
   ]
   supported_identity_providers  = ["COGNITO"]
-  callback_urls                 = [for origin in local.origins : "${origin}/"]
+  callback_urls                 = ["${aws_apigatewayv2_api.api.api_endpoint}/auth/callback"]
   logout_urls                   = [for origin in local.origins : "${origin}/"]
   prevent_user_existence_errors = "ENABLED"
   enable_token_revocation       = true
@@ -68,7 +68,11 @@ resource "aws_cognito_user_pool_client" "web" {
     id_token      = "minutes"
     refresh_token = "days"
   }
-  explicit_auth_flows = ["ALLOW_REFRESH_TOKEN_AUTH"]
+  explicit_auth_flows = ["ALLOW_USER_AUTH"]
+  refresh_token_rotation {
+    feature                    = "ENABLED"
+    retry_grace_period_seconds = 10
+  }
 }
 resource "aws_cognito_user_group" "roles" {
   for_each     = toset(["SOLICITANTE", "APROBADOR"])

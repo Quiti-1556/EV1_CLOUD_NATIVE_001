@@ -48,10 +48,7 @@ locals {
       { name = "SPRING_PROFILES_ACTIVE", value = "aws" },
       { name = "DB_URL", value = "jdbc:postgresql://${aws_db_instance.db.endpoint}/solicitudes?sslmode=verify-full&sslrootcert=/app/rds-ca.pem" },
       { name = "DB_USER", value = "solicitudes_app" },
-      { name = "APP_SECURITY_ENABLED", value = "true" },
-      { name = "COGNITO_ISSUER_URI", value = local.issuer },
-      { name = "COGNITO_CLIENT_ID", value = aws_cognito_user_pool_client.web.id },
-      { name = "CORS_ALLOWED_ORIGINS", value = join(",", local.origins) }
+      { name = "APP_IDENTITY_MODE", value = "gateway" }
     ]
     secrets = [{
       name      = "DB_PASSWORD"

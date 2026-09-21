@@ -45,5 +45,5 @@ jobs:
         run: echo "TARGET_ENV=${SELECTED,,}" >> "$GITHUB_ENV"
       - name: Leer estado remoto
         run: bash scripts/terraform-init.sh "$TARGET_ENV"
-      - name: Publicar
+      - name: Compilar Angular y publicar con API Gateway y CORS
         run: bash scripts/deploy-frontend.sh "$TARGET_ENV"
